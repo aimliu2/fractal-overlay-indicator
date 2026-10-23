@@ -207,6 +207,11 @@ periodChanged = time(autoTf) != time(autoTf)[1]
 marketIdle = timenow >= time_close
 cdText     = marketIdle or na(time_close(autoTf)) ? 'Closed' : fmtCountdown(time_close(autoTf) - timenow)
 
+// Share of the HTF candle's duration already elapsed, 0..1
+htfProgress = math.max(0.0, math.min(1.0, (timenow - time(autoTf)) / (time_close(autoTf) - time(autoTf))))
+progUnknown = marketIdle or na(htfProgress)
+progColor   = progUnknown ? color.gray : htfProgress < 0.25 ? #e53935 : htfProgress < 0.5 ? #fb8c00 : htfProgress < 0.75 ? #00acc1 : #43a047
+
 //#endregion
 
 //#region [LOGIC]
@@ -256,20 +261,22 @@ if barstate.islast and boolTable
     ltfDisp = tfLabel(ltfCode())
     htfDisp = tfLabel(autoTf)
 
-    table.cell(wm, 0, 0, 'Dashboard', text_color = dashBgColor, bgcolor = dashTextColor, text_size = size.normal, text_halign = text.align_center, text_font_family = font.family_default)
+    cdStr = htfDisp + ' close in : ' + cdText
+    table.cell(wm, 0, 0, cdStr, text_color = dashBgColor, bgcolor = dashTextColor, text_size = size.normal, text_halign = text.align_center, text_font_family = font.family_default)
+
+    filled  = progUnknown ? 0 : int(math.floor(htfProgress * 10))
+    progStr = str.repeat('█', filled) + str.repeat('░', 10 - filled) + ' ' + (progUnknown ? '??%' : str.tostring(math.floor(htfProgress * 100)) + '%')
+    table.cell(wm, 0, 1, progStr, text_color = progColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_monospace)
 
     alignStr = 'Alignment : ' + ltfDisp + '-' + htfDisp
-    table.cell(wm, 0, 1, alignStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
+    table.cell(wm, 0, 2, alignStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
 
     dateStr     = str.format_time(time_close, 'dd MMM yyyy', syminfo.timezone)
     isForex     = syminfo.type == 'forex'
     pipSize     = syminfo.currency == 'JPY' ? 0.01 : 0.0001
     atrStr      = isForex ? str.tostring(htfAtr / pipSize, '#.#') + ' pips' : str.tostring(htfAtr, format.mintick) + ' pts'
     atrDateStr  = 'ATR : ' + atrStr + '  |  ' + dateStr
-    table.cell(wm, 0, 2, atrDateStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
-
-    cdStr = htfDisp + ' close in : ' + cdText
-    table.cell(wm, 0, 3, cdStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
+    table.cell(wm, 0, 3, atrDateStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
 
     if not validTf
         curTfStr = tfLabel(curTfCode())
