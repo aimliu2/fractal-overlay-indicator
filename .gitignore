@@ -1,0 +1,9 @@
+# Agent files
+.claude
+.codex
+AGENTS.md
+CLAUDE.md
+MEMORY.md
+user_memory.md
+respond_format.md
+.DS_Store

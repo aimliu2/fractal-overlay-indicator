@@ -1,0 +1,264 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// This script is based on the original open-source-fractal script by cantolab
+// which can be found at https://github.com/cantolab/open-source-fractal
+// © TheAimLiu
+
+//@version=6
+indicator("Fractal Overlay", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+//#region [INPUTS]
+
+grpModel   = 'General Settings'
+modelType  = input.string('Auto', 'Fractal', options = ['Custom', 'Auto', '1m-15m', '3m-30m', '5m-1H', '15m-4H', '1H-1D', '4H-1W', '1D-1W'], group = grpModel, inline = 'fractal')
+customLTF  = input.timeframe('5',  'Custom LTF                      ', group = grpModel, inline = 'custom', active = modelType == 'Custom')
+customHTF  = input.timeframe('60', '', group = grpModel, inline = 'custom', tooltip = 'Only active when Alignment is set to Custom', active = modelType == 'Custom')
+
+grpCandles     = 'HTF Candles'
+htfCandleCount = input.int(4, 'HTF Candles', minval = 1, maxval = 30, group = grpCandles, inline = 'count')
+hideHtf        = input.bool(false, 'Hide?', group = grpCandles, inline = 'count', tooltip = 'Hide HTF candles preview')
+candleOffsetIn = input.int(0, 'Offset', minval = 0, group = grpCandles)
+
+bullBody   = input.color(color.new(color.green, 0), 'Body', group = grpCandles, inline = 'body')
+bearBody   = input.color(color.new(#000000, 0), '', group = grpCandles, inline = 'body')
+borderBull = input.color(color.new(#000000, 0), 'Borders', group = grpCandles, inline = 'border')
+borderBear = input.color(color.new(#000000, 0), '', group = grpCandles, inline = 'border')
+wickBull   = input.color(color.new(#000000, 0), 'Wick', group = grpCandles, inline = 'wick')
+wickBear   = input.color(color.new(#000000, 0), '', group = grpCandles, inline = 'wick')
+
+showHtfOpen  = input.bool(true, 'HTF Open', group = grpCandles, inline = 'htfopen')
+htfOpenColor = input.color(color.new(#1a1a1a, 30), '', group = grpCandles, inline = 'htfopen')
+htfOpenStyle = input.string('Solid', '', options = ['Solid', 'Dashed', 'Dotted'], group = grpCandles, inline = 'htfopen')
+htfOpenWidth = input.int(1, '', minval = 1, group = grpCandles, inline = 'htfopen')
+
+showVlines = input.bool(true, 'O/C Time', group = grpCandles, inline = 'vline')
+lineColor  = input.color(color.new(color.gray, 60), '', group = grpCandles, inline = 'vline')
+lineStyle  = input.string('Solid', '', options = ['Solid', 'Dashed', 'Dotted'], group = grpCandles, inline = 'vline')
+lineWidth  = input.int(1, '', minval = 1, group = grpCandles, inline = 'vline')
+
+grpDash  = 'Dashboard'
+boolTable = input.bool(true, 'Show Dashboard', group = grpDash)
+tableVert = input.string('Top', '', options = ['Top', 'Middle', 'Bottom'], inline = 'loc', group = grpDash)
+tableHorz = input.string('Right', '', options = ['Left', 'Center', 'Right'], inline = 'loc', group = grpDash)
+atrLen    = input.int(14, 'HTF ATR Period', minval = 1, group = grpDash)
+dashTextColor = input.color(color.new(#131722, 0), 'Text', group = grpDash, inline = 'color')
+dashBgColor   = input.color(color.new(#ffffff, 0), 'Background', group = grpDash, inline = 'color')
+
+//#endregion
+
+//#region [CONSTANTS AND STATE]
+
+candleSpacing = 3
+
+type HtfCandle
+    float o
+    float h
+    float l
+    float c
+    box   body
+    line  wickUp
+    line  wickDown
+
+var array<HtfCandle> htfCandles = array.new<HtfCandle>()
+var array<line>      vLines     = array.new<line>()
+var int              htfOpenBar = na
+var line             htfOpenLn  = na
+
+//#endregion
+
+//#region [FUNCTIONS]
+
+tfLabel(string tf) =>
+    switch tf
+        '1'   => '1m'
+        '3'   => '3m'
+        '5'   => '5m'
+        '15'  => '15m'
+        '60'  => '1h'
+        '240' => '4h'
+        '1D'  => '1D'
+        'D'   => '1D'
+        '1W'  => '1W'
+        'W'   => '1W'
+        '1M'  => '1M'
+        'M'   => '1M'
+        =>       tf + 'm'
+
+tfMins(string tf) =>
+    switch tf
+        '1D' => 1440
+        'D'  => 1440
+        '1W' => 10080
+        'W'  => 10080
+        '1M' => 43200
+        'M'  => 43200
+        =>      int(str.tonumber(tf))
+
+curTfCode() =>
+    timeframe.isdaily ? '1D' : timeframe.isweekly ? '1W' : timeframe.ismonthly ? '1M' : timeframe.period
+
+tablePosition(string vert, string horz) =>
+    switch vert + '-' + horz
+        'Top-Left'      => position.top_left
+        'Top-Center'    => position.top_center
+        'Top-Right'     => position.top_right
+        'Middle-Left'   => position.middle_left
+        'Middle-Center' => position.middle_center
+        'Middle-Right'  => position.middle_right
+        'Bottom-Left'   => position.bottom_left
+        'Bottom-Center' => position.bottom_center
+        'Bottom-Right'  => position.bottom_right
+        =>                 position.top_right
+
+lineStyleFromStr(string s) =>
+    switch s
+        'Solid'  => line.style_solid
+        'Dashed' => line.style_dashed
+        'Dotted' => line.style_dotted
+        =>          line.style_dashed
+
+autoHTF() =>
+    switch timeframe.period
+        '1'   => '15'
+        '3'   => '30'
+        '5'   => '60'
+        '15'  => '240'
+        '60'  => '1D'
+        '240' => '1W'
+        '1D'  => '1M'
+        =>       '1M'
+
+ltfCode() =>
+    switch modelType
+        '1m-15m' => '1'
+        '3m-30m' => '3'
+        '5m-1H'  => '5'
+        '15m-4H' => '15'
+        '1H-1D'  => '60'
+        '4H-1W'  => '240'
+        '1D-1W'  => '1D'
+        'Custom' => customLTF
+        =>          curTfCode()
+
+isAutoValidTf(int mins) => mins == 1 or mins == 3 or mins == 5 or mins == 15 or mins == 60 or mins == 240 or mins == 1440
+
+method delete(HtfCandle c) =>
+    box.delete(c.body)
+    line.delete(c.wickUp)
+    line.delete(c.wickDown)
+
+method update(HtfCandle c, float curH, float curL, float curC) =>
+    c.h := math.max(c.h, curH)
+    c.l := math.min(c.l, curL)
+    c.c := curC
+    c
+
+method draw(HtfCandle c, int leftBar) =>
+    bool isBull = c.c >= c.o
+    int  midX   = leftBar + 1
+    box.set_left(c.body, leftBar)
+    box.set_right(c.body, leftBar + 2)
+    box.set_top(c.body, math.max(c.o, c.c))
+    box.set_bottom(c.body, math.min(c.o, c.c))
+    box.set_bgcolor(c.body, isBull ? bullBody : bearBody)
+    box.set_border_color(c.body, isBull ? borderBull : borderBear)
+    line.set_x1(c.wickUp, midX)
+    line.set_x2(c.wickUp, midX)
+    line.set_y1(c.wickUp, c.h)
+    line.set_y2(c.wickUp, math.max(c.o, c.c))
+    line.set_color(c.wickUp, isBull ? wickBull : wickBear)
+    line.set_x1(c.wickDown, midX)
+    line.set_x2(c.wickDown, midX)
+    line.set_y1(c.wickDown, c.l)
+    line.set_y2(c.wickDown, math.min(c.o, c.c))
+    line.set_color(c.wickDown, isBull ? wickBull : wickBear)
+
+newHtfCandle() =>
+    HtfCandle.new(open, high, low, close,
+         box.new(bar_index, high, bar_index, low, border_color = borderBull, border_width = 1),
+         line.new(bar_index, high, bar_index, high, color = wickBull),
+         line.new(bar_index, low, bar_index, low, color = wickBull))
+
+autoTf = switch modelType
+    '1m-15m' => '15'
+    '3m-30m' => '30'
+    '5m-1H'  => '60'
+    '15m-4H' => '240'
+    '1H-1D'  => '1D'
+    '4H-1W'  => '1W'
+    '1D-1W'  => '1W'
+    'Custom' => customHTF
+    =>          autoHTF()
+
+validTf = modelType == 'Auto' ? isAutoValidTf(tfMins(curTfCode())) : tfMins(curTfCode()) <= tfMins(ltfCode())
+
+[currentO, htfAtr] = request.security(syminfo.tickerid, autoTf, [open[0], ta.atr(atrLen)], lookahead = barmerge.lookahead_on)
+
+periodChanged = time(autoTf) != time(autoTf)[1]
+
+//#endregion
+
+//#region [LOGIC]
+
+candleOffset = candleOffsetIn + 10
+
+if periodChanged
+    htfCandles.unshift(newHtfCandle())
+    while htfCandles.size() > htfCandleCount
+        htfCandles.pop().delete()
+    htfOpenBar := bar_index
+else if htfCandles.size() > 0
+    htfCandles.set(0, htfCandles.first().update(high, low, close))
+
+if showVlines and periodChanged
+    vLines.unshift(line.new(bar_index, low - ta.tr, bar_index, high + ta.tr, xloc.bar_index, extend.both, lineColor, lineStyleFromStr(lineStyle), lineWidth))
+    while vLines.size() > htfCandleCount
+        line.delete(vLines.pop())
+
+//#endregion
+
+//#region [PLOT]
+
+if (barstate.islast or barstate.isrealtime) and validTf and htfCandles.size() > 0 and not hideHtf
+    n = htfCandles.size()
+    for i = n - 1 to 0
+        htfCandles.get(i).draw(bar_index + candleOffset + candleSpacing * (n - 1 - i))
+    if showHtfOpen and not na(htfOpenBar)
+        curOpenX2 = box.get_right(htfCandles.first().body)
+        if na(htfOpenLn)
+            htfOpenLn := line.new(htfOpenBar, currentO, curOpenX2, currentO, xloc.bar_index, extend.none, htfOpenColor, lineStyleFromStr(htfOpenStyle), htfOpenWidth)
+        else
+            line.set_xy1(htfOpenLn, htfOpenBar, currentO)
+            line.set_xy2(htfOpenLn, curOpenX2, currentO)
+            line.set_color(htfOpenLn, htfOpenColor)
+            line.set_style(htfOpenLn, lineStyleFromStr(htfOpenStyle))
+            line.set_width(htfOpenLn, htfOpenWidth)
+
+if barstate.islast and boolTable
+    var table wm = table.new(tablePosition(tableVert, tableHorz), 1, 4,
+         bgcolor      = color.new(#000000, 100),
+         border_color = dashTextColor,
+         border_width = 1,
+         frame_color  = dashTextColor,
+         frame_width  = 1)
+
+    ltfDisp = tfLabel(ltfCode())
+    htfDisp = tfLabel(autoTf)
+
+    table.cell(wm, 0, 0, 'Open Source Fractal', text_color = dashBgColor, bgcolor = dashTextColor, text_size = size.normal, text_halign = text.align_center, text_font_family = font.family_default)
+
+    alignStr = 'Alignment : ' + ltfDisp + '-' + htfDisp
+    table.cell(wm, 0, 1, alignStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
+
+    dateStr     = str.format_time(time_close, 'dd MMM yyyy', syminfo.timezone)
+    isForex     = syminfo.type == 'forex'
+    pipSize     = syminfo.currency == 'JPY' ? 0.01 : 0.0001
+    atrStr      = isForex ? str.tostring(htfAtr / pipSize, '#.#') + ' pips' : str.tostring(htfAtr, format.mintick) + ' pts'
+    atrDateStr  = 'ATR : ' + atrStr + '  |  ' + dateStr
+    table.cell(wm, 0, 2, atrDateStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
+
+    if not validTf
+        curTfStr = tfLabel(curTfCode())
+        warnMsg  = '⚠ Switch to ' + ltfDisp + ' or lower (now: ' + curTfStr + ')'
+        table.cell(wm, 0, 3, warnMsg, text_color = dashBgColor, bgcolor = color.new(#cc0000, 0), text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
+
+//#endregion
