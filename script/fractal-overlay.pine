@@ -139,6 +139,14 @@ ltfCode() =>
         'Custom' => customLTF
         =>          curTfCode()
 
+// Minute resolution, rounded up: ticks arrive irregularly, so seconds would jump
+fmtCountdown(int ms) =>
+    int mins = math.ceil(math.max(ms, 0) / 60000.0)
+    int d    = math.floor(mins / 1440)
+    int h    = math.floor((mins % 1440) / 60)
+    int m    = mins % 60
+    d > 0 ? str.tostring(d) + 'd ' + str.tostring(h) + 'h' : h > 0 ? str.tostring(h) + 'h ' + str.tostring(m) + 'm' : str.tostring(m) + 'm'
+
 isAutoValidTf(int mins) => mins == 1 or mins == 3 or mins == 5 or mins == 15 or mins == 60 or mins == 240 or mins == 1440
 
 method delete(HtfCandle c) =>
@@ -195,6 +203,10 @@ validTf = modelType == 'Auto' ? isAutoValidTf(tfMins(curTfCode())) : tfMins(curT
 
 periodChanged = time(autoTf) != time(autoTf)[1]
 
+// Chart bar already past its close with no newer bar => no trading (closed, halted, or illiquid)
+marketIdle = timenow >= time_close
+cdText     = marketIdle or na(time_close(autoTf)) ? 'Closed' : fmtCountdown(time_close(autoTf) - timenow)
+
 //#endregion
 
 //#region [LOGIC]
@@ -234,7 +246,7 @@ if (barstate.islast or barstate.isrealtime) and validTf and htfCandles.size() > 
             line.set_width(htfOpenLn, htfOpenWidth)
 
 if barstate.islast and boolTable
-    var table wm = table.new(tablePosition(tableVert, tableHorz), 1, 4,
+    var table wm = table.new(tablePosition(tableVert, tableHorz), 1, 5,
          bgcolor      = color.new(#000000, 100),
          border_color = dashTextColor,
          border_width = 1,
@@ -256,9 +268,12 @@ if barstate.islast and boolTable
     atrDateStr  = 'ATR : ' + atrStr + '  |  ' + dateStr
     table.cell(wm, 0, 2, atrDateStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
 
+    cdStr = htfDisp + ' close in : ' + cdText
+    table.cell(wm, 0, 3, cdStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
+
     if not validTf
         curTfStr = tfLabel(curTfCode())
         warnMsg  = '⚠ Switch to ' + ltfDisp + ' or lower (now: ' + curTfStr + ')'
-        table.cell(wm, 0, 3, warnMsg, text_color = dashBgColor, bgcolor = color.new(#cc0000, 0), text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
+        table.cell(wm, 0, 4, warnMsg, text_color = dashBgColor, bgcolor = color.new(#cc0000, 0), text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
 
 //#endregion
