@@ -244,7 +244,7 @@ if barstate.islast and boolTable
     ltfDisp = tfLabel(ltfCode())
     htfDisp = tfLabel(autoTf)
 
-    table.cell(wm, 0, 0, 'Open Source Fractal', text_color = dashBgColor, bgcolor = dashTextColor, text_size = size.normal, text_halign = text.align_center, text_font_family = font.family_default)
+    table.cell(wm, 0, 0, 'Dashboard', text_color = dashBgColor, bgcolor = dashTextColor, text_size = size.normal, text_halign = text.align_center, text_font_family = font.family_default)
 
     alignStr = 'Alignment : ' + ltfDisp + '-' + htfDisp
     table.cell(wm, 0, 1, alignStr, text_color = dashTextColor, bgcolor = dashBgColor, text_size = size.small, text_halign = text.align_center, text_font_family = font.family_default)
